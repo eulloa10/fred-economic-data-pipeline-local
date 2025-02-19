@@ -1,0 +1,85 @@
+.vscode/
+
+# Python-related files
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.log
+*.db
+*.sqlite
+*.pot
+*.py[cod]
+
+# Virtual environments
+fred-local-venv/
+venv/
+env/
+.venv/
+env.bak/
+venv.bak/
+
+# Jupyter Notebook files
+.ipynb_checkpoints
+
+# Airflow configuration
+airflow.cfg
+airflow_login.py
+dbinit.py
+initdb.py
+secrets.py
+
+# Airflow sqlite databases
+airflow.db
+
+# Airflow temporary artifacts
+airflow/git_version
+airflow/www/static/coverage/
+airflow/www/*.log
+airflow/ui/coverage/
+logs/
+config/
+airflow-webserver.pid
+standalone_admin_password.txt
+warnings.txt
+warn-summary-*.txt
+
+# AWS-related files
+.aws/
+.aws/credentials
+.aws/config
+*.pem
+*.key
+*.cert
+
+# environment files
+.env
+.env.local
+.env.*.local
+
+# Temporary files
+*.bak
+*.swp
+*.swo
+*.tmp
+*.swm
+
+# Docker-related files
+# Docker container and image files
+*.log
+docker-compose.override.yml
+docker-compose.override.*
+
+
+# Docker build cache
+**/.docker/
+.docker/
+*.docker
+
+# macOS-specific files
+.DS_Store
