@@ -1,11 +1,11 @@
+import logging
+import os
+from typing import Optional, List, Tuple
+
+import boto3
 import pandas as pd
 import requests
-import boto3
-import json
-import os
 from dotenv import load_dotenv
-import logging
-from typing import Optional, List, Dict
 
 load_dotenv('../../.env')
 
@@ -17,6 +17,38 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
+
+class DateRangeGenerator:
+    @staticmethod
+    def generate_date_ranges(
+        start_date: str,
+        end_date: str,
+    ) -> List[Tuple[str, str]]:
+        """
+        Generate date ranges for extraction
+
+        :param start_date: Overall start date
+        :param end_date: Overall end date
+        :return: List of (start, end) date tuples
+        """
+        try:
+            start_date = pd.to_datetime(start_date)
+            end_date = pd.to_datetime(end_date)
+
+            date_ranges = []
+            current_start = start_date
+
+            while current_start <= end_date:
+                current_end = min(current_start + pd.DateOffset(months=1) - pd.DateOffset(days=1), end_date)
+                date_ranges.append((current_start.strftime('%Y-%m-%d'), current_end.strftime('%Y-%m-%d')))
+                current_start = current_end + pd.DateOffset(days=1)
+
+            return date_ranges
+
+        except Exception as e:
+            logger.error("Error generating date ranges: %s", e)
+            return []
+
 
 class FREDDataExtractor:
     def __init__(self,
@@ -168,7 +200,7 @@ class FREDDataExtractor:
     def process_fred_data(self,
                           series_id: str,
                           start_date: str,
-                          end_date: str) -> Optional[str]:
+                          end_date: str) -> Optional[List[str]]:
         """
         Method to extract, format, and save FRED data to S3
 
@@ -177,35 +209,53 @@ class FREDDataExtractor:
         :param end_date: End date for observations
         :return: S3 path where the data is saved
         """
+        date_ranges = DateRangeGenerator.generate_date_ranges(
+            start_date,
+            end_date
+        )
+
+        s3_paths = []
+
         try:
-            raw_data = self.extract_fred_data(
-                series_id,
-                observation_start=start_date,
-                observation_end=end_date
-            )
+            for range_start, range_end in date_ranges:
+                logger.info("Processing date range: %s to %s", range_start, range_end)
 
-            if raw_data is None:
-                return None
+                raw_data = self.extract_fred_data(
+                    series_id,
+                    observation_start=range_start,
+                    observation_end=range_end
+                )
 
-            formatted_data = self.format_fred_data(raw_data, series_id)
+                if raw_data is None or raw_data.empty:
+                    logger.warning("No data extracted for %s from %s to %s", series_id, range_start, range_end)
+                    continue
 
-            if formatted_data is None:
-                return None
+                formatted_data = self.format_fred_data(raw_data, series_id)
 
-            s3_path = self.save_to_s3(formatted_data, series_id)
+                if formatted_data is None:
+                    logger.warning("Data formatting failed for %s from %s to %s", series_id, range_start, range_end)
+                    continue
 
-            return s3_path
+                s3_path = self.save_to_s3(formatted_data, series_id)
+
+                if s3_path:
+                    s3_paths.append(s3_path)
+                else:
+                    logger.warning("Failed to save data for %s from %s to %s", series_id, range_start, range_end)
+
+            return s3_paths
+
         except Exception as e:
-            logger.error("A processing error occured: %s", e)
+            logger.error("A processing error occurred: %s", e, exc_info=True)
             return None
 
 def extract_fred_indicator(
     series_id: str,
     start_date: str,
     end_date: str,
-) -> Optional[str]:
+) -> Optional[List[str]]:
     """
-    Airflow: Extract, format, and save FRED data to S3
+    Extract, format, and save FRED raw data to S3
 
     :param series_id: FRED series ID
     :param start_date: Start date for observations
@@ -218,7 +268,12 @@ def extract_fred_indicator(
 if __name__ == '__main__':
     result = extract_fred_indicator(
         series_id='UNRATE',
-        start_date='2024-12-01',
-        end_date='2024-12-31'
+        start_date='2017-01-01',
+        end_date='2017-12-31'
     )
-    print(f"Extraction result: {result}")
+    if result:
+        print("Extraction successful. S3 Paths:")
+        for path in result:
+            print(path)
+    else:
+        print("Extraction failed or no data found")
