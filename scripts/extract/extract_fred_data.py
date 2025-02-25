@@ -133,7 +133,7 @@ class FREDDataExtractor:
 
             date_series = pd.to_datetime(formatted_data['date'])
             formatted_data['observation_date'] = date_series.dt.date.astype(str)
-            formatted_data['observation_month'] = date_series.dt.month.astype(str).apply(lambda x: x.zfill(2)) # zero-pad month
+            formatted_data['observation_month'] = date_series.dt.month.astype(str)
             formatted_data['observation_year'] = date_series.dt.year.astype(str)
 
             formatted_data['value'] = pd.to_numeric(formatted_data['value'], errors='coerce').astype(str)
@@ -267,7 +267,7 @@ def extract_fred_indicator(
 
 if __name__ == '__main__':
     result = extract_fred_indicator(
-        series_id='UNRATE',
+        series_id='DGS10',
         start_date='2017-01-01',
         end_date='2017-12-31'
     )
