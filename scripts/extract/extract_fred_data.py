@@ -98,7 +98,7 @@ class FREDDataExtractor:
             print(data)
 
             if 'observations' not in data:
-                logger.error("No observations found for series_id: %s", series_id)
+                logger.warning("No observations found for series_id: %s", series_id)
                 return None
 
             df = pd.DataFrame(data['observations'])
@@ -267,9 +267,9 @@ def extract_fred_indicator(
 
 if __name__ == '__main__':
     result = extract_fred_indicator(
-        series_id='DGS10',
-        start_date='2017-01-01',
-        end_date='2017-12-31'
+        series_id='UNRATE',
+        start_date='2025-01-01',
+        end_date='2025-12-31'
     )
     if result:
         print("Extraction successful. S3 Paths:")

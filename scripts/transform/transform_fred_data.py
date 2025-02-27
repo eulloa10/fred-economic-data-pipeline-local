@@ -5,6 +5,7 @@ import io
 import boto3
 import pandas as pd
 from dotenv import load_dotenv
+from botocore.exceptions import ClientError
 
 load_dotenv('../../.env')
 
@@ -92,6 +93,13 @@ class FREDDataProcessor:
                 logger.info("Successfully read JSON data from %s without lines=True", s3_path)
                 return data
 
+        except ClientError as e:
+            if e.response['Error']['Code'] == 'NoSuchKey':
+                logger.warning("File not found at %s. Returning empty DataFrame.", s3_path)
+                return pd.DataFrame()
+            else:
+                logger.error("Error reading JSON from S3: %s", e)
+                return pd.DataFrame()
         except Exception as e:
             logger.error("Error reading JSON from S3: %s", e)
             return pd.DataFrame()
@@ -105,6 +113,10 @@ class FREDDataProcessor:
         logger.info("Transforming raw data with %d rows", len(raw_data))
 
         try:
+            if raw_data.empty:
+                logger.warning("No raw data available to transform.")
+                return pd.DataFrame()
+
             logger.info("Dropping rows with NaN values in 'value' column")
             raw_data = raw_data.dropna(subset=['value'])
             raw_data = raw_data[raw_data['value'] != '.']
@@ -113,16 +125,16 @@ class FREDDataProcessor:
             raw_data['value'] = pd.to_numeric(raw_data['value'], errors='coerce')
 
             logger.info("Grouping data by 'indicator' and aggregating")
-            raw_data = raw_data.groupby('indicator', as_index=False).agg(
+            raw_data = raw_data.groupby(['indicator', "observation_month", "observation_year"], as_index=False).agg(
                 value=('value', 'mean'),
                 observation_count=('value', 'count')
             )
 
             logger.info("Adding processing timestamp")
-            raw_data['processing_timestamp'] = pd.Timestamp.now(tz='UTC').isoformat()
+            raw_data['processing_time'] = pd.Timestamp.now(tz='UTC').isoformat()
 
             cols = [
-              'indicator', 'observation_year', 'observation_month', 'value', 'observation_count', 'processing_timestamp'
+              'indicator', 'observation_year', 'observation_month', 'value', 'observation_count', 'processing_time'
             ]
 
             transformed_data = raw_data[cols]
@@ -216,9 +228,9 @@ def transform_fred_indicator_raw_data(
 
 if __name__ == '__main__':
     result = transform_fred_indicator_raw_data(
-        series_id='DGS10',
-        start_date='2017-01-01',
-        end_date='2017-12-31'
+        series_id='UNRATE',
+        start_date='2025-01-01',
+        end_date='2025-12-31'
     )
     if result:
         logger.info("Transform successful. Processed data paths:")
