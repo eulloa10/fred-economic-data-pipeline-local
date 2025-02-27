@@ -2,6 +2,7 @@ import logging
 import os
 from typing import Optional, List, Tuple
 
+import time
 import boto3
 import pandas as pd
 import requests
@@ -242,6 +243,8 @@ class FREDDataExtractor:
                     s3_paths.append(s3_path)
                 else:
                     logger.warning("Failed to save data for %s from %s to %s", series_id, range_start, range_end)
+
+                time.sleep(5)
 
             return s3_paths
 
