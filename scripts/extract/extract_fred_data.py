@@ -130,7 +130,7 @@ class FREDDataExtractor:
             formatted_data = fred_raw_data.copy()
 
             formatted_data['indicator'] = series_id
-            formatted_data['ingestion_timestamp'] = pd.Timestamp.now(tz='UTC').isoformat()
+            formatted_data['ingested_at'] = pd.Timestamp.now(tz='UTC').isoformat()
 
             date_series = pd.to_datetime(formatted_data['date'])
             formatted_data['observation_date'] = date_series.dt.date.astype(str)
@@ -145,7 +145,7 @@ class FREDDataExtractor:
                 'observation_month',
                 'observation_year',
                 'value',
-                'ingestion_timestamp'
+                'ingested_at'
             ]
 
             formatted_data = formatted_data[cols]
@@ -181,7 +181,7 @@ class FREDDataExtractor:
             s3_path = (f"raw_data/indicator={indicator}/"
                        f"year={year}/"
                        f"month={month}/"
-                       f"{indicator}_{year}{month}_data.json")
+                       f"{indicator}_{year}_{month}.json")
 
             s3_client = boto3.client('s3')
             s3_client.put_object(
@@ -271,8 +271,8 @@ def extract_fred_indicator(
 if __name__ == '__main__':
     result = extract_fred_indicator(
         series_id='UNRATE',
-        start_date='2025-01-01',
-        end_date='2025-12-31'
+        start_date='2016-01-01',
+        end_date='2016-01-31'
     )
     if result:
         print("Extraction successful. S3 Paths:")

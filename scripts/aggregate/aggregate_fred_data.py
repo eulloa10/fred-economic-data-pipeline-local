@@ -117,7 +117,7 @@ class FredDataAggregator:
             for year in years:
               yearly_data = pd.DataFrame()
               for month in months:
-                  processed_data_path = f'processed_data/indicator={series_id}/year={year}/month={month}/{series_id}_{year}{month}.parquet'
+                  processed_data_path = f'processed_data/indicator={series_id}/year={year}/month={month}/{series_id}_{year}_{month}.parquet'
                   logger.info("Reading processed data from S3: %s", processed_data_path)
                   monthly_data = self.read_parquet_from_s3(processed_data_path)
 
@@ -130,7 +130,7 @@ class FredDataAggregator:
                   logger.warning("No data found for %s for year %s", series_id, year)
                   continue
 
-              yearly_data['aggregation_time'] = pd.Timestamp.now(tz='UTC').isoformat()
+              yearly_data['aggregated_at'] = pd.Timestamp.now(tz='UTC').isoformat()
               yearly_data['value'] = yearly_data['value'].round(2)
               s3_path = f'aggregated_data/indicator={series_id}/year={year}/{series_id}_{year}.parquet'
               self.save_parquet_to_s3(yearly_data, s3_path)
@@ -163,8 +163,8 @@ def aggregate_fred_indicator_processed_data(
 if __name__ == '__main__':
     result = aggregate_fred_indicator_processed_data(
         series_id='UNRATE',
-        start_year=2017,
-        end_year=2018
+        start_year=2016,
+        end_year=2016
     )
     if result:
         logger.info("Aggregation completed successfully. S3 paths: %s", result)

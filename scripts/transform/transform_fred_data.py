@@ -125,16 +125,21 @@ class FREDDataProcessor:
             raw_data['value'] = pd.to_numeric(raw_data['value'], errors='coerce')
 
             logger.info("Grouping data by 'indicator' and aggregating")
-            raw_data = raw_data.groupby(['indicator', "observation_month", "observation_year"], as_index=False).agg(
+            raw_data = raw_data.groupby(['indicator', 'observation_month', 'observation_year'], as_index=False).agg(
                 value=('value', 'mean'),
-                observation_count=('value', 'count')
+                observation_count=('value', 'count'),
+                ingested_at=('ingested_at', 'max')
             )
 
+            logger.info("Converting ingest timestamp from UNIX to ISO format")
+            raw_data['ingested_at'] = pd.to_datetime(raw_data['ingested_at'], unit='ms', utc=True).dt.tz_convert('UTC').dt.strftime('%Y-%m-%dT%H:%M:%S.%f+00:00')
+
+
             logger.info("Adding processing timestamp")
-            raw_data['processing_time'] = pd.Timestamp.now(tz='UTC').isoformat()
+            raw_data['processed_at'] = pd.Timestamp.now(tz='UTC').isoformat()
 
             cols = [
-              'indicator', 'observation_year', 'observation_month', 'value', 'observation_count', 'processing_time'
+              'indicator', 'observation_year', 'observation_month', 'value', 'observation_count', 'ingested_at', 'processed_at'
             ]
 
             transformed_data = raw_data[cols]
@@ -193,13 +198,13 @@ class FREDDataProcessor:
             for year, months in year_month_ranges.items():
                 logger.info("Processing year: %d with months: %s", year, months)
                 for month in months:
-                    raw_data_path = f'raw_data/indicator={series_id}/year={year}/month={month}/{series_id}_{year}{month}_data.json'
+                    raw_data_path = f'raw_data/indicator={series_id}/year={year}/month={month}/{series_id}_{year}_{month}.json'
                     logger.info(f"Reading raw data from {raw_data_path}")
                     raw_data = self.read_json_from_s3(raw_data_path)
 
                     processed_data = self.transform_raw_data(raw_data)
 
-                    processed_data_path = f'processed_data/indicator={series_id}/year={year}/month={month}/{series_id}_{year}{month}.parquet'
+                    processed_data_path = f'processed_data/indicator={series_id}/year={year}/month={month}/{series_id}_{year}_{month}.parquet'
                     logger.info(f"Saving processed data to {processed_data_path}")
                     self.save_parquet_to_s3(processed_data, processed_data_path)
                     s3_paths.append(processed_data_path)
@@ -229,8 +234,8 @@ def transform_fred_indicator_raw_data(
 if __name__ == '__main__':
     result = transform_fred_indicator_raw_data(
         series_id='UNRATE',
-        start_date='2025-01-01',
-        end_date='2025-12-31'
+        start_date='2016-01-01',
+        end_date='2016-01-31'
     )
     if result:
         logger.info("Transform successful. Processed data paths:")
