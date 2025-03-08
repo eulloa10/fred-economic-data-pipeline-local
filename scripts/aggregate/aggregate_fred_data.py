@@ -17,29 +17,6 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
-class YearRangeGenerator:
-    @staticmethod
-    def generate_years(start_year: int,
-                       end_year: int
-                      ) -> List[int]:
-        """
-        Generate a list of years for a given range
-
-        :param start_year: Overall start year
-        :param end_year: Overall end year
-        :return: List of years
-        """
-        logger.info("Generating year range from %s to %s", start_year, end_year)
-
-        try:
-            years = list(range(start_year, end_year + 1))
-            logger.info("Generated year range: %s", years)
-            return years
-
-        except Exception as e:
-            logger.error("Error generating year range: %s", e)
-            return []
-
 class FredDataAggregator:
     def __init__(self,
                  s3_bucket: str = os.getenv('S3_DATA_LAKE')):
@@ -108,7 +85,7 @@ class FredDataAggregator:
         :return: List of S3 paths where the aggregated data is stored
         """
         logger.info("Aggregating data for series ID %s from %s to %s", series_id, start_year, end_year)
-        years = YearRangeGenerator.generate_years(start_year, end_year)
+        years = [year for year in range(start_year, end_year + 1)]
         months = [x for x in range(1, 13)]
 
         s3_paths = []
