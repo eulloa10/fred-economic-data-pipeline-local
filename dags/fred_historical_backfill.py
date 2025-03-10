@@ -1,5 +1,5 @@
 from airflow import DAG
-from airflow.operators.python_operator import PythonOperator
+from airflow.operators.python import PythonOperator
 from datetime import datetime, timedelta
 import yaml
 import os
@@ -22,6 +22,16 @@ def load_indicators_config():
 
     with open(config_path, 'r') as file:
         return yaml.safe_load(file)
+
+def generate_historical_backfill_dags():
+    """
+    Generate historical backfill DAGs for all indicators
+    """
+    indicators_config = load_indicators_config()
+    dags = []
+    for indicator in indicators_config['indicators']:
+        dags.append(create_fred_historical_backfill_dag(indicator))
+    return dags
 
 def create_fred_historical_backfill_dag(indicator_config):
     """
@@ -48,123 +58,89 @@ def create_fred_historical_backfill_dag(indicator_config):
         catchup=True
     ) as dag:
 
-        def extract_monthly_task(**context):
+        def extract_monthly_task(series_id, start_date, end_date, **kwargs):
             """
             Extract data for a specific month
             """
-            execution_date = context['execution_date']
-
-            start_date = execution_date.replace(day=1).strftime('%Y-%m-%d')
-            end_date = (execution_date + timedelta(days=32)).replace(day=1) - timedelta(days=1)
-            end_date = end_date.strftime('%Y-%m-%d')
-
-            series_id = indicator_config['series_id']
-
             try:
-                extract_fred_indicator(
-                    series_id=series_id,
-                    start_date=start_date,
-                    end_date=end_date
-                )
-
+                extract_fred_indicator(series_id=series_id, start_date=start_date, end_date=end_date)
             except Exception as e:
-                logging.error("Monthly extraction failed for %s in %s: %s", series_id, start_date, e)
+                logging.getLogger(__name__).error(f"Monthly extraction failed for {series_id} in {start_date}: {e}")
                 raise
 
-        def transform_monthly_task(**context):
+        def transform_monthly_task(series_id, start_date, end_date, **kwargs):
             """
             Transform data for a specific month
             """
-            execution_date = context['execution_date']
-
-            start_date = execution_date.replace(day=1).strftime('%Y-%m-%d')
-            end_date = (execution_date + timedelta(days=32)).replace(day=1) - timedelta(days=1)
-            end_date = end_date.strftime('%Y-%m-%d')
-
-            series_id = indicator_config['series_id']
-
             try:
-                transformed_data = transform_fred_indicator_raw_data(
-                    series_id=series_id,
-                    start_date=start_date,
-                    end_date=end_date
-                )
-
+                transform_fred_indicator_raw_data(series_id=series_id, start_date=start_date, end_date=end_date)
             except Exception as e:
-                logging.error("Monthly transformation failed for %s: %s", series_id, e)
+                logging.getLogger(__name__).error(f"Monthly transformation failed for {series_id}: {e}")
                 raise
 
-        def aggregate_yearly_task(**context):
+        def aggregate_yearly_task(series_id, year, **kwargs):
             """
             Aggregate monthly data for a specific year
             """
-            execution_date = context['execution_date']
-            year = execution_date.year
-
-            series_id = indicator_config['series_id']
-
             try:
-                aggregate_fred_indicator_processed_data(
-                    series_id=series_id,
-                    start_year=year,
-                    end_year=year
-                )
-
+                aggregate_fred_indicator_processed_data(series_id=series_id, start_year=year, end_year=year)
             except Exception as e:
-                logging.error("Yearly aggregation failed for %s in %s: %s", series_id, year, e)
+                logging.getLogger(__name__).error(f"Yearly aggregation failed for {series_id} in {year}: {e}")
                 raise
 
-        def load_yearly_task(**context):
+        def load_yearly_task(series_id, year, table_name, **kwargs):
             """
             Load aggregated yearly data
             """
-            execution_date = context['execution_date']
-            year = execution_date.year
-
-            series_id = indicator_config['series_id']
-            table_name = indicator_config['table_name']
-
             try:
-                load_to_rds(
-                    series_id=series_id,
-                    start_year=year,
-                    end_year=year,
-                    table_name=table_name
-                )
-
+                load_to_rds(series_id=series_id, start_year=year, end_year=year, table_name=table_name)
             except Exception as e:
-                logging.error("Yearly loading failed for %s in %s: %s", series_id, year, e)
+                logging.getLogger(__name__).error(f"Yearly loading failed for {series_id} in {year}: {e}")
                 raise
+
+        execution_date = "{{ execution_date }}"
+        start_date = "{{ execution_date.replace(day=1).strftime('%Y-%m-%d') }}"
+        end_date = "{{ (execution_date + macros.timedelta(days=32)).replace(day=1) - macros.timedelta(days=1) }}"
+        year = "{{ execution_date.year }}"
 
         extract_monthly = PythonOperator(
             task_id='extract_monthly',
             python_callable=extract_monthly_task,
-            provide_context=True,
-            dag=dag
+            op_kwargs={
+                'series_id': indicator_config['series_id'],
+                'start_date': start_date,
+                'end_date': end_date,
+            },
         )
 
         transform_monthly = PythonOperator(
             task_id='transform_monthly',
             python_callable=transform_monthly_task,
-            provide_context=True,
-            dag=dag
+            op_kwargs={
+                'series_id': indicator_config['series_id'],
+                'start_date': start_date,
+                'end_date': end_date,
+            },
         )
 
         aggregate_yearly = PythonOperator(
             task_id='aggregate_yearly',
             python_callable=aggregate_yearly_task,
-            provide_context=True,
-            dag=dag,
-            # Ensure this runs only after the last month of the year
-            trigger_rule='all_done'
+            op_kwargs={
+                'series_id': indicator_config['series_id'],
+                'year': year,
+            },
+            trigger_rule='all_success'
         )
 
         load_yearly = PythonOperator(
             task_id='load_yearly',
             python_callable=load_yearly_task,
-            provide_context=True,
-            dag=dag,
-            # Ensure this runs only after successful aggregation
+            op_kwargs={
+                'series_id': indicator_config['series_id'],
+                'year': year,
+                'table_name': indicator_config['table_name'],
+            },
             trigger_rule='all_success'
         )
 
@@ -173,13 +149,6 @@ def create_fred_historical_backfill_dag(indicator_config):
 
     return dag
 
-def generate_historical_backfill_dags():
-    """
-    Generate historical backfill DAGs for all indicators
-    """
-    indicators_config = load_indicators_config()
-
-    for indicator in indicators_config['indicators']:
-        globals()[f'historical_backfill_dag_{indicator["series_id"]}'] = create_fred_historical_backfill_dag(indicator)
-
-generate_historical_backfill_dags()
+dags = generate_historical_backfill_dags()
+for dag in dags:
+    globals()[dag.dag_id] = dag
