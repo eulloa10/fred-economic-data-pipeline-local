@@ -1,6 +1,5 @@
 # Automated Economic Indicator Dashboard using Python, Airflow, AWS and Looker Studio
 
-## [Live Looker Studio Report](https://lookerstudio.google.com/reporting/8a3e2e21-7502-4573-9bd3-34a732eb2d57)
 
 ## Background
 
@@ -31,8 +30,8 @@ The core components of the project include:
 - **Data Ingestion**: Fetching data from external APIs (FRED) and storing it in Amazon S3
 - **Data Transformation**: Using Python(Pandas) to clean and prepare the data across the various layers of the data lake
 - **Data Storage**: Storing the transformed data in Amazon RDS for further analysis and reporting
-- **Dashboard**: Visualizing the financial indicators using Looker Studio
 - **Automation**: Managing the data pipeline and ensuring regular updates using Apache Airflow, running in a Docker container
+- **Dashboard**: Visualizing the financial indicators using Looker Studio
 
 ---
 
