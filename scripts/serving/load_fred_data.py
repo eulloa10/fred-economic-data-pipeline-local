@@ -37,19 +37,6 @@ class FREDDataLoader:
             raise ValueError("S3 bucket name is not set.")
         logger.info("FREDDataLoader initialized with S3 bucket: %s", self.s3_bucket)
 
-    # def _create_engine(self):
-    #     """
-    #     Create a SQLAlchemy engine for database connection
-    #     """
-    #     try:
-    #         db_url = f"postgresql+psycopg2://{self.db_params['user']}:{self.db_params['password']}@{self.db_params['host']}:{self.db_params['port']}/{self.db_params['database']}"
-    #         engine = create_engine(db_url)
-    #         logger.info("SQLAlchemy engine created successfully.")
-    #         return engine
-    #     except Exception as e:
-    #         logger.error("Error creating SQLAlchemy engine: %s", e)
-    #         raise
-
     def load_data_to_db(self, dataframe: pd.DataFrame, table_name: str, unique_columns: List[str]) -> Optional[int]:
         """
         Load a pandas DataFrame into the database.
@@ -61,7 +48,7 @@ class FREDDataLoader:
         try:
             if dataframe is None or dataframe.empty:
                 logger.warning("DataFrame is empty. No data to load into %s", table_name)
-                return
+                return 0
 
             records = dataframe.to_dict('records')
             metadata = MetaData()
