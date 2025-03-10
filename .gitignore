@@ -63,6 +63,9 @@ warn-summary-*.txt
 .env.local
 .env.*.local
 
+# Google API
+google_credentials.json
+
 # Temporary files
 *.bak
 *.swp
