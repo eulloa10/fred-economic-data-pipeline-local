@@ -1,23 +1,36 @@
 import logging
 import os
-from typing import Optional, List, Tuple
+from typing import Dict, Optional, List, Tuple, Any
 
 import time
 import boto3
 import pandas as pd
 import requests
+from requests.adapters import HTTPAdapter, Retry
 from dotenv import load_dotenv
+from airflow.hooks.base_hook import BaseHook
+# from airflow.utils.log.logging_mixin import LoggingMixin
 
-load_dotenv('../../.env')
+load_dotenv(os.path.join(os.path.dirname(__file__), '../../.env'))
 
 FRED_API_KEY = os.getenv('FRED_API_KEY')
 S3_DATA_LAKE = os.getenv('S3_DATA_LAKE')
 
-logger = logging.getLogger(__name__)
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
+AWS_CONN_ID = 'aws_default'
+aws_connection = BaseHook.get_connection(AWS_CONN_ID)
+
+session = boto3.Session(
+    aws_access_key_id=aws_connection.login,
+    aws_secret_access_key=aws_connection.password,
+    region_name=aws_connection.extra_dejson.get('region_name', 'us-west-1')
 )
+
+logger = logging.getLogger(__name__)
+
+# logging.basicConfig(
+#     level=logging.INFO,
+#     format='%(asctime)s - %(levelname)s - %(message)s'
+# )
 
 class DateRangeGenerator:
     @staticmethod
@@ -69,6 +82,14 @@ class FREDDataExtractor:
         if not self.s3_bucket:
             raise ValueError("S3 bucket name is not set. Please set the S3_DATA_LAKE environment variable.")
 
+        self.s3_client = session.client('s3')
+        self.http_session = requests.Session()
+        retries = Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])
+        adapter = HTTPAdapter(max_retries=retries)
+        self.http_session.mount('http://', adapter)
+        self.http_session.mount('https://', adapter)
+
+
     def extract_fred_data(self,
                           series_id: str,
                           observation_start: str,
@@ -92,23 +113,46 @@ class FREDDataExtractor:
 
             logger.info("Fetching data from: %s", url)
 
-            response = requests.get(url)
+            response = self.http_session.get(url)
+
+            if response.status_code == 429:
+                retry_after = response.headers.get('Retry-After')
+                sleep_time = int(retry_after) if retry_after else 10
+                logger.warning("Rate limited. Retrying after %s seconds.", sleep_time)
+                time.sleep(sleep_time)
+                response = self.http_session.get(url)
+
             response.raise_for_status()
 
-            data = response.json()
-            print(data)
+            data: Dict[str, Any] = response.json()
 
-            if 'observations' not in data:
-                logger.warning("No observations found for series_id: %s", series_id)
+            if 'observations' not in data or not isinstance(data['observations'], list):
+                logger.warning("Invalid API response for series_id: %s", series_id)
+                return None
+
+            if not data['observations']:
+                logger.warning("No observations found in API response for series_id: %s", series_id)
+                return None
+
+            if not all(isinstance(obs, dict) and 'date' in obs and 'value' in obs for obs in data['observations']):
+                logger.warning("Invalid observation data for series_id: %s", series_id)
                 return None
 
             df = pd.DataFrame(data['observations'])
+
+            if not all(col in df.columns for col in ['date', 'value']):
+                logger.warning("Missing columns in DataFrame for series_id: %s", series_id)
+                return None
+
             logger.info("Successfully extracted %d rows of data for series_id: %s", len(df), series_id)
             return df
 
+        except requests.exceptions.RequestException as e:
+            logger.error("Network error during FRED API request: %s", e)
+            raise
         except Exception as e:
             logger.error("An unexpected error occurred: %s", e)
-            return None
+            raise
 
     def format_fred_data(self,
                          fred_raw_data: pd.DataFrame,
@@ -183,8 +227,7 @@ class FREDDataExtractor:
                        f"month={month}/"
                        f"{indicator}_{year}_{month}.json")
 
-            s3_client = boto3.client('s3')
-            s3_client.put_object(
+            self.s3_client.put_object(
                 Bucket=self.s3_bucket,
                 Key=s3_path,
                 Body=json_bytes,
@@ -194,6 +237,9 @@ class FREDDataExtractor:
             logger.info("Successfully saved data to %s", s3_path)
             return s3_path
 
+        except boto3.exceptions.ClientError as e:
+            logger.error(f"S3 error during save: {e}")
+            raise
         except Exception as e:
             logger.error("An unexpected error occurred during S3 save: %s", e)
             return None
@@ -268,15 +314,15 @@ def extract_fred_indicator(
     extractor = FREDDataExtractor()
     return extractor.process_fred_data(series_id, start_date, end_date)
 
-if __name__ == '__main__':
-    result = extract_fred_indicator(
-        series_id='UNRATE',
-        start_date='2016-01-01',
-        end_date='2016-01-31'
-    )
-    if result:
-        print("Extraction successful. S3 Paths:")
-        for path in result:
-            print(path)
-    else:
-        print("Extraction failed or no data found")
+# if __name__ == '__main__':
+#     result = extract_fred_indicator(
+#         series_id='UNRATE',
+#         start_date='2010-01-01',
+#         end_date='2010-02-28'
+#     )
+#     if result:
+#         print("Extraction successful. S3 Paths:")
+#         for path in result:
+#             print(path)
+#     else:
+#         print("Extraction failed or no data found")
