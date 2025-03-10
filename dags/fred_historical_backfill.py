@@ -83,9 +83,10 @@ def create_fred_historical_backfill_dag(indicator_config):
             Aggregate monthly data for a specific year
             """
             try:
+                year = int(year)
                 aggregate_fred_indicator_processed_data(series_id=series_id, start_year=year, end_year=year)
             except Exception as e:
-                logging.getLogger(__name__).error(f"Yearly aggregation failed for {series_id} in {year}: {e}")
+                logging.getLogger(__name__).error("Yearly aggregation failed for %s in %s: %s", series_id, year, e)
                 raise
 
         def load_yearly_task(series_id, year, table_name, **kwargs):
@@ -93,15 +94,16 @@ def create_fred_historical_backfill_dag(indicator_config):
             Load aggregated yearly data
             """
             try:
+                year = int(year)
                 load_to_rds(series_id=series_id, start_year=year, end_year=year, table_name=table_name)
             except Exception as e:
-                logging.getLogger(__name__).error(f"Yearly loading failed for {series_id} in {year}: {e}")
+                logging.getLogger(__name__).error("Yearly loading failed for %s in %s: %s", series_id, year, e)
                 raise
 
         execution_date = "{{ execution_date }}"
         start_date = "{{ execution_date.replace(day=1).strftime('%Y-%m-%d') }}"
         end_date = "{{ (execution_date + macros.timedelta(days=32)).replace(day=1) - macros.timedelta(days=1) }}"
-        year = "{{ execution_date.year }}"
+        year = "{{ execution_date.year | int }}"
 
         extract_monthly = PythonOperator(
             task_id='extract_monthly',
