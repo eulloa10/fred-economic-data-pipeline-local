@@ -44,7 +44,7 @@ airflow/www/static/coverage/
 airflow/www/*.log
 airflow/ui/coverage/
 logs/
-config/
+# config/
 airflow-webserver.pid
 standalone_admin_password.txt
 warnings.txt

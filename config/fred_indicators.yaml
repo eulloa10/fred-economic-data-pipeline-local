@@ -1,0 +1,78 @@
+indicators:
+  - series_id: DGS10
+    name: Yield Curve
+    start_date: '2010-01-01'
+    end_date: '2010-12-31'
+    start_year: 2010
+    end_year: 2010
+    table_name: economic_indicators
+  - series_id: EFFR
+    name: Federal Funds Rate
+    start_date: '2010-01-01'
+    end_date: '2010-12-31'
+    start_year: 2010
+    end_year: 2010
+    table_name: economic_indicators
+  - series_id: CSUSHPINSA
+    name: Case-Shiller Index
+    start_date: '2010-01-01'
+    end_date: '2010-12-31'
+    start_year: 2010
+    end_year: 2010
+    table_name: economic_indicators
+  - series_id: UNRATE
+    name: Unemployment Rate
+    start_date: '2010-01-01'
+    end_date: '2010-12-31'
+    start_year: 2010
+    end_year: 2010
+    table_name: economic_indicators
+  - series_id: CPIAUCSL
+    name: Consumer Price Index
+    start_date: '2010-01-01'
+    end_date: '2010-12-31'
+    start_year: 2010
+    end_year: 2010
+    table_name: economic_indicators
+  - series_id: PCE
+    name: Personal Consumption Expenditures
+    start_date: '2010-01-01'
+    end_date: '2010-12-31'
+    start_year: 2010
+    end_year: 2010
+    table_name: economic_indicators
+  - series_id: JTSJOL
+    name: JOLTS Openings (Nonfarm)
+    start_date: '2010-01-01'
+    end_date: '2010-12-31'
+    start_year: 2010
+    end_year: 2010
+    table_name: economic_indicators
+  - series_id: JTSHIR
+    name: JOLTS Hires (Nonfarm)
+    start_date: '2010-01-01'
+    end_date: '2010-12-31'
+    start_year: 2010
+    end_year: 2010
+    table_name: economic_indicators
+  - series_id: JTSTSR
+    name: JOLTS Turnover (Nonfarm)
+    start_date: '2010-01-01'
+    end_date: '2010-12-31'
+    start_year: 2010
+    end_year: 2010
+    table_name: economic_indicators
+  - series_id: PSAVERT
+    name: Personal Savings Rate
+    start_date: '2010-01-01'
+    end_date: '2010-12-31'
+    start_year: 2010
+    end_year: 2010
+    table_name: economic_indicators
+  - series_id: CSCICP03USM665S
+    name: Consumer Confidence
+    start_date: '2010-01-01'
+    end_date: '2010-12-31'
+    start_year: 2010
+    end_year: 2010
+    table_name: economic_indicators
