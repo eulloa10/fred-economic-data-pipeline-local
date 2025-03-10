@@ -2,35 +2,36 @@ import logging
 import os
 from typing import Dict, Optional, List
 import io
-import boto3
 import pandas as pd
 from dotenv import load_dotenv
 from botocore.exceptions import ClientError
+from airflow.hooks.S3_hook import S3Hook
+import pandas.errors
 
-load_dotenv('../../.env')
+load_dotenv(os.path.join(os.path.dirname(__file__), '../../.env'))
 
 S3_DATA_LAKE = os.getenv('S3_DATA_LAKE')
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+# logging.basicConfig(
+#     level=logging.INFO,
+#     format='%(asctime)s - %(levelname)s - %(message)s'
+# )
 
 class FredDataAggregator:
     def __init__(self,
-                 s3_bucket: str = os.getenv('S3_DATA_LAKE')):
+                 s3_bucket: str = S3_DATA_LAKE,
+                 s3_conn_id: str = 'aws_default'):
         """
         Initialize the FRED data aggregator
 
         :param s3_bucket: S3 bucket to store the data
         """
         logger.info("Initializing FREDDataAggregator with S3 bucket: %s", s3_bucket)
+        if not s3_bucket:
+            raise ValueError("S3 bucket name is not set.")
         self.s3_bucket = s3_bucket
-        self.s3_client = boto3.client('s3')
-
-        if not self.s3_bucket:
-            raise ValueError("S3 bucket name is not set. Please set the S3_DATA_LAKE environment variable.")
+        self.s3_hook = S3Hook(aws_conn_id=s3_conn_id)
 
     def read_parquet_from_s3(self, s3_path: str) -> pd.DataFrame:
         """
@@ -41,16 +42,23 @@ class FredDataAggregator:
         """
         logger.info("Reading Parquet file from S3: %s", s3_path)
         try:
-            response = self.s3_client.get_object(Bucket=self.s3_bucket, Key=s3_path)
-            df = pd.read_parquet(io.BytesIO(response['Body'].read()))
-            logger.info("Read Parquet file from S3 successfully")
-            return df
+            s3_object = self.s3_hook.get_key(key=s3_path, bucket_name=self.s3_bucket)
+            if s3_object:
+                df = pd.read_parquet(io.BytesIO(s3_object.get()['Body'].read()))
+                logger.info("Read Parquet file from S3 successfully")
+                return df
+            else:
+                logger.warning("File not found at %s. Returning empty DataFrame.", s3_path)
+                return pd.DataFrame()
 
         except ClientError as e:
-            if e.response['Error']['Code'] == 'NoSuchKey':
-                logger.warning("File not found at %s. Returning empty DataFrame.", s3_path)
-            else:
-                logger.error("Error reading Parquet file from S3: %s", e)
+            logger.error("Error reading Parquet file from S3: %s", e)
+            return pd.DataFrame()
+        except pandas.errors.ParserError as e:
+            logger.error("Error parsing Parquet file from S3: %s", e)
+            return pd.DataFrame()
+        except Exception as e:
+            logger.error("Error reading Parquet file from S3: %s", e)
             return pd.DataFrame()
 
         except Exception as e:
@@ -66,12 +74,20 @@ class FredDataAggregator:
         """
         logger.info("Saving Parquet file to S3: %s", s3_path)
         try:
+            if df.empty:
+                logger.warning("DataFrame is empty. Not saving to S3.")
+                return
+
             buffer = io.BytesIO()
             df.to_parquet(buffer, index=False)
-            self.s3_client.put_object(Bucket=self.s3_bucket, Key=s3_path, Body=buffer.getvalue())
+            self.s3_hook.load_bytes(buffer.getvalue(), key=s3_path, bucket_name=self.s3_bucket, replace=True)
             logger.info("Saved Parquet file to S3 successfully")
+        except ClientError as e:
+            logger.error(f"Error saving Parquet file to S3: {e}")
+            raise
         except Exception as e:
-            logger.error("Error saving Parquet file to S3: %s", e)
+            logger.error(f"Error saving Parquet file to S3: {e}")
+            raise
 
     def aggregate_data(self,
                        series_id: str,
@@ -87,7 +103,6 @@ class FredDataAggregator:
         logger.info("Aggregating data for series ID %s from %s to %s", series_id, start_year, end_year)
         years = [year for year in range(start_year, end_year + 1)]
         months = [x for x in range(1, 13)]
-
         s3_paths = []
 
         try:
@@ -137,15 +152,15 @@ def aggregate_fred_indicator_processed_data(
     aggregator = FredDataAggregator()
     return aggregator.aggregate_data(series_id, start_year, end_year)
 
-if __name__ == '__main__':
-    result = aggregate_fred_indicator_processed_data(
-        series_id='UNRATE',
-        start_year=2016,
-        end_year=2016
-    )
-    if result:
-        logger.info("Aggregation completed successfully. S3 paths: %s", result)
-        for path in result:
-            print(path)
-    else:
-        logger.error("Aggregation failed. No data returned.")
+# if __name__ == '__main__':
+#     result = aggregate_fred_indicator_processed_data(
+#         series_id='UNRATE',
+#         start_year=2016,
+#         end_year=2016
+#     )
+#     if result:
+#         logger.info("Aggregation completed successfully. S3 paths: %s", result)
+#         for path in result:
+#             print(path)
+#     else:
+#         logger.error("Aggregation failed. No data returned.")
