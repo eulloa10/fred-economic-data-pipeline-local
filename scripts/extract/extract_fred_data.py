@@ -3,12 +3,12 @@ import os
 from typing import Dict, Optional, List, Tuple, Any
 
 import time
-import boto3
+from botocore.exceptions import ClientError
 import pandas as pd
 import requests
 from requests.adapters import HTTPAdapter, Retry
 from dotenv import load_dotenv
-from airflow.hooks.base_hook import BaseHook
+from airflow.hooks.S3_hook import S3Hook
 # from airflow.utils.log.logging_mixin import LoggingMixin
 
 load_dotenv(os.path.join(os.path.dirname(__file__), '../../.env'))
@@ -16,14 +16,7 @@ load_dotenv(os.path.join(os.path.dirname(__file__), '../../.env'))
 FRED_API_KEY = os.getenv('FRED_API_KEY')
 S3_DATA_LAKE = os.getenv('S3_DATA_LAKE')
 
-AWS_CONN_ID = 'aws_default'
-aws_connection = BaseHook.get_connection(AWS_CONN_ID)
-
-session = boto3.Session(
-    aws_access_key_id=aws_connection.login,
-    aws_secret_access_key=aws_connection.password,
-    region_name=aws_connection.extra_dejson.get('region_name', 'us-west-1')
-)
+AWS_CONN_ID = os.getenv('AWS_CONN_ID')
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +75,7 @@ class FREDDataExtractor:
         if not self.s3_bucket:
             raise ValueError("S3 bucket name is not set. Please set the S3_DATA_LAKE environment variable.")
 
-        self.s3_client = session.client('s3')
+        self.s3_hook = S3Hook(aws_conn_id=AWS_CONN_ID)
         self.http_session = requests.Session()
         retries = Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])
         adapter = HTTPAdapter(max_retries=retries)
@@ -227,17 +220,17 @@ class FREDDataExtractor:
                        f"month={month}/"
                        f"{indicator}_{year}_{month}.json")
 
-            self.s3_client.put_object(
-                Bucket=self.s3_bucket,
-                Key=s3_path,
-                Body=json_bytes,
-                ContentType='application/json'
+            self.s3_hook.load_bytes(
+                json_bytes,
+                key=s3_path,
+                bucket_name=self.s3_bucket,
+                replace=True,
             )
 
             logger.info("Successfully saved data to %s", s3_path)
             return s3_path
 
-        except boto3.exceptions.ClientError as e:
+        except ClientError as e:
             logger.error(f"S3 error during save: {e}")
             raise
         except Exception as e:

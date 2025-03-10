@@ -2,20 +2,21 @@ import logging
 import os
 from typing import Dict, Optional, List
 import io
-import boto3
 import pandas as pd
 from dotenv import load_dotenv
 from botocore.exceptions import ClientError
+from airflow.hooks.S3_hook import S3Hook
 
-load_dotenv('../../.env')
+load_dotenv(os.path.join(os.path.dirname(__file__), '../../.env'))
 
 S3_DATA_LAKE = os.getenv('S3_DATA_LAKE')
+AWS_CONN_ID = os.getenv('AWS_CONN_ID')
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+# logging.basicConfig(
+#     level=logging.INFO,
+#     format='%(asctime)s - %(levelname)s - %(message)s'
+# )
 
 class YearMonthGenerator:
     @staticmethod
@@ -64,7 +65,7 @@ class FREDDataProcessor:
         """
         logger.info("Initializing FREDDataProcessor with S3 bucket: %s", s3_bucket)
         self.s3_bucket = s3_bucket
-        self.s3_client = boto3.client('s3')
+        self.s3_hook = S3Hook(aws_conn_id=AWS_CONN_ID)
 
         if not self.s3_bucket:
             raise ValueError("S3 bucket name is not set. Please set the S3_DATA_LAKE environment variable.")
@@ -79,27 +80,25 @@ class FREDDataProcessor:
         logger.info("Reading JSON from S3 path: %s", s3_path)
 
         try:
-            response = self.s3_client.get_object(Bucket=self.s3_bucket, Key=s3_path)
-            raw_data = response['Body'].read().decode('utf-8')
-            logger.debug("Raw data read from S3: %s", raw_data[:10])
-
-            try:
-                data = pd.read_json(io.StringIO(raw_data), lines=True)
-                logger.info("Successfully read JSON data from %s", s3_path)
-                return data
-            except ValueError:
-                logger.warning("Failed to read JSON with lines=True, trying without it.")
-                data = pd.read_json(io.StringIO(raw_data))
-                logger.info("Successfully read JSON data from %s without lines=True", s3_path)
-                return data
-
-        except ClientError as e:
-            if e.response['Error']['Code'] == 'NoSuchKey':
+            s3_object = self.s3_hook.get_key(key=s3_path, bucket_name=self.s3_bucket)
+            if s3_object:
+                raw_data = s3_object.get()['Body'].read().decode('utf-8')
+                try:
+                    data = pd.read_json(io.StringIO(raw_data), lines=True)
+                    return data
+                except ValueError:
+                    data = pd.read_json(io.StringIO(raw_data))
+                    return data
+            else:
                 logger.warning("File not found at %s. Returning empty DataFrame.", s3_path)
                 return pd.DataFrame()
-            else:
-                logger.error("Error reading JSON from S3: %s", e)
-                return pd.DataFrame()
+
+        except ClientError as e:
+            logger.error("Error reading JSON from S3: %s", e)
+            return pd.DataFrame()
+        except pd.errors.ParserError as e:
+            logger.error("Error parsing JSON from S3: %s", e)
+            return pd.DataFrame()
         except Exception as e:
             logger.error("Error reading JSON from S3: %s", e)
             return pd.DataFrame()
@@ -125,24 +124,24 @@ class FREDDataProcessor:
             raw_data['value'] = pd.to_numeric(raw_data['value'], errors='coerce')
 
             logger.info("Grouping data by 'indicator' and aggregating")
-            raw_data = raw_data.groupby(['indicator', 'observation_month', 'observation_year'], as_index=False).agg(
+            transformed_data = raw_data.groupby(['indicator', 'observation_month', 'observation_year'], as_index=False).agg(
                 value=('value', 'mean'),
                 observation_count=('value', 'count'),
                 ingested_at=('ingested_at', 'max')
             )
 
             logger.info("Converting ingest timestamp from UNIX to ISO format")
-            raw_data['ingested_at'] = pd.to_datetime(raw_data['ingested_at'], unit='ms', utc=True).dt.tz_convert('UTC').dt.strftime('%Y-%m-%dT%H:%M:%S.%f+00:00')
+            transformed_data['ingested_at'] = pd.to_datetime(transformed_data['ingested_at'], unit='ms', utc=True).dt.tz_convert('UTC').dt.strftime('%Y-%m-%dT%H:%M:%S.%f+00:00')
 
 
             logger.info("Adding processing timestamp")
-            raw_data['processed_at'] = pd.Timestamp.now(tz='UTC').isoformat()
+            transformed_data['processed_at'] = pd.Timestamp.now(tz='UTC').isoformat()
 
             cols = [
               'indicator', 'observation_year', 'observation_month', 'value', 'observation_count', 'ingested_at', 'processed_at'
             ]
 
-            transformed_data = raw_data[cols]
+            transformed_data = transformed_data[cols]
 
             logger.info("Transformed complete with %d rows", len(transformed_data))
             return transformed_data
@@ -168,11 +167,15 @@ class FREDDataProcessor:
                 return
 
             buffer = df.to_parquet(index=False)
-            self.s3_client.put_object(Bucket=self.s3_bucket, Key=s3_path, Body=buffer)
+            self.s3_hook.load_bytes(buffer, key=s3_path, bucket_name=self.s3_bucket, replace=True)
             logger.info("Data saved to S3 at %s", s3_path)
 
+        except ClientError as e:
+            logger.error("Error saving Parquet to S3: %s", e)
+            raise
         except Exception as e:
             logger.error("Error saving Parquet to S3: %s", e)
+            raise
 
     def process_raw_data(self,
                      series_id: str,
@@ -187,28 +190,23 @@ class FREDDataProcessor:
         :return: Processed data as a list of strings
         """
         logger.info("Processing raw data for series_id: %s, start_date: %s, end_date: %s", series_id, start_date, end_date)
-        year_month_ranges = YearMonthGenerator.generate_year_months(
-            start_date,
-            end_date
-        )
-
-        s3_paths = []
-
         try:
+            year_month_ranges = YearMonthGenerator.generate_year_months(
+                start_date,
+                end_date
+            )
+            s3_paths = []
             for year, months in year_month_ranges.items():
                 logger.info("Processing year: %d with months: %s", year, months)
                 for month in months:
                     raw_data_path = f'raw_data/indicator={series_id}/year={year}/month={month}/{series_id}_{year}_{month}.json'
-                    logger.info(f"Reading raw data from {raw_data_path}")
+                    logger.info("Reading raw data from %s", raw_data_path)
                     raw_data = self.read_json_from_s3(raw_data_path)
-
-                    processed_data = self.transform_raw_data(raw_data)
-
                     processed_data_path = f'processed_data/indicator={series_id}/year={year}/month={month}/{series_id}_{year}_{month}.parquet'
-                    logger.info(f"Saving processed data to {processed_data_path}")
+                    processed_data = self.transform_raw_data(raw_data)
+                    logger.info("Saving processed data to %s", processed_data_path)
                     self.save_parquet_to_s3(processed_data, processed_data_path)
                     s3_paths.append(processed_data_path)
-
             logger.info("All data processed and saved to S3")
             return s3_paths
 
@@ -231,15 +229,15 @@ def transform_fred_indicator_raw_data(
     processor = FREDDataProcessor()
     return processor.process_raw_data(series_id, start_date, end_date)
 
-if __name__ == '__main__':
-    result = transform_fred_indicator_raw_data(
-        series_id='UNRATE',
-        start_date='2016-01-01',
-        end_date='2016-01-31'
-    )
-    if result:
-        logger.info("Transform successful. Processed data paths:")
-        for path in result:
-            print(path)
-    else:
-        logger.error("Transform failed. No data processed.")
+# if __name__ == '__main__':
+#     result = transform_fred_indicator_raw_data(
+#         series_id='UNRATE',
+#         start_date='2016-01-01',
+#         end_date='2016-01-31'
+#     )
+#     if result:
+#         logger.info("Transform successful. Processed data paths:")
+#         for path in result:
+#             print(path)
+#     else:
+#         logger.error("Transform failed. No data processed.")

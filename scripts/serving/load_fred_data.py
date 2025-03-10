@@ -2,51 +2,53 @@ import logging
 import os
 from typing import Optional, List
 import io
-import boto3
 import pandas as pd
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, Table, MetaData
 from sqlalchemy.dialects.postgresql import insert
 from botocore.exceptions import ClientError
+from airflow.hooks.S3_hook import S3Hook
+from airflow.providers.postgres.hooks.postgres import PostgresHook
+from sqlalchemy.exc import SQLAlchemyError
 
-load_dotenv('../../.env')
+load_dotenv(os.path.join(os.path.dirname(__file__), '../../.env'))
+
+S3_DATA_LAKE = os.getenv('S3_DATA_LAKE')
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+# logging.basicConfig(
+#     level=logging.INFO,
+#     format='%(asctime)s - %(levelname)s - %(message)s'
+# )
+
 class FREDDataLoader:
     def __init__(self,
-                 db_params: dict,
-                 s3_bucket: str = os.getenv('S3_DATA_LAKE')):
+                 db_conn_id: str,
+                 s3_bucket: str = S3_DATA_LAKE,
+                 aws_conn_id: str = 'aws_default'):
         """
         Initialize the FRED data loader
         :param db_params: Database connection parameters
         """
         self.s3_bucket = s3_bucket
-        self.s3_client = boto3.client('s3')
-        self.db_params = db_params
-        self.engine = self._create_engine()
-
+        self.s3_hook = S3Hook(aws_conn_id=aws_conn_id)
+        self.db_hook = PostgresHook(postgres_conn_id=db_conn_id)
         if not self.s3_bucket:
-            raise ValueError("S3 bucket name is not set. Please set the S3_DATA_LAKE environment variable.")
-        if not self.db_params:
-            raise ValueError("Database connection parameters are not set. Please provide the database connection parameters.")
+            raise ValueError("S3 bucket name is not set.")
         logger.info("FREDDataLoader initialized with S3 bucket: %s", self.s3_bucket)
 
-    def _create_engine(self):
-        """
-        Create a SQLAlchemy engine for database connection
-        """
-        try:
-            db_url = f"postgresql+psycopg2://{self.db_params['user']}:{self.db_params['password']}@{self.db_params['host']}:{self.db_params['port']}/{self.db_params['database']}"
-            engine = create_engine(db_url)
-            logger.info("SQLAlchemy engine created successfully.")
-            return engine
-        except Exception as e:
-            logger.error("Error creating SQLAlchemy engine: %s", e)
-            raise
+    # def _create_engine(self):
+    #     """
+    #     Create a SQLAlchemy engine for database connection
+    #     """
+    #     try:
+    #         db_url = f"postgresql+psycopg2://{self.db_params['user']}:{self.db_params['password']}@{self.db_params['host']}:{self.db_params['port']}/{self.db_params['database']}"
+    #         engine = create_engine(db_url)
+    #         logger.info("SQLAlchemy engine created successfully.")
+    #         return engine
+    #     except Exception as e:
+    #         logger.error("Error creating SQLAlchemy engine: %s", e)
+    #         raise
 
     def load_data_to_db(self, dataframe: pd.DataFrame, table_name: str, unique_columns: List[str]) -> Optional[int]:
         """
@@ -63,25 +65,20 @@ class FREDDataLoader:
 
             records = dataframe.to_dict('records')
             metadata = MetaData()
-            table = Table(table_name, metadata, autoload_with=self.engine)
+            table = Table(table_name, metadata, autoload_with=self.db_hook.get_sqlalchemy_engine())
 
-            with self.engine.begin() as connection:
+            with self.db_hook.get_sqlalchemy_engine().begin() as connection:
                 insert_stmt = insert(table).values(records)
-
                 upsert_stmt = insert_stmt.on_conflict_do_update(
                     index_elements=unique_columns,
-                    set_={
-                        col: insert_stmt.excluded[col]
-                        for col in records[0].keys()
-                        if col not in unique_columns
-                    }
+                    set_={col: insert_stmt.excluded[col] for col in records[0].keys() if col not in unique_columns}
                 )
                 connection.execute(upsert_stmt)
 
             logger.info("Data upserted successfully into table: %s", table_name)
             return len(records)
 
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error("Error upserting data into table %s: %s", table_name, e)
             raise
 
@@ -93,10 +90,10 @@ class FREDDataLoader:
         :return: DataFrame containing the query results.
         """
         try:
-            df = pd.read_sql_query(query, self.engine)
+            df = pd.read_sql_query(query, self.db_hook.get_sqlalchemy_engine())
             logger.info("Data read successfully from the database.")
             return df
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error("Error reading data from the database: %s", e)
             raise
 
@@ -109,18 +106,17 @@ class FREDDataLoader:
         """
         logger.info("Reading Parquet file from S3: %s", s3_path)
         try:
-            response = self.s3_client.get_object(Bucket=self.s3_bucket, Key=s3_path)
-            df = pd.read_parquet(io.BytesIO(response['Body'].read()))
-            logger.info("Read Parquet file from S3 successfully")
-            return df
-
-        except ClientError as e:
-            if e.response['Error']['Code'] == 'NoSuchKey':
-                logger.warning("File not found at %s. Returning empty DataFrame.", s3_path)
+            s3_object = self.s3_hook.get_key(key=s3_path, bucket_name=self.s3_bucket)
+            if s3_object:
+                df = pd.read_parquet(io.BytesIO(s3_object.get()['Body'].read()))
+                logger.info("Read Parquet file from S3 successfully")
+                return df
             else:
-                logger.error("Error reading Parquet file from S3: %s", e)
+                logger.warning("File not found at %s. Returning empty DataFrame.", s3_path)
+                return pd.DataFrame()
+        except ClientError as e:
+            logger.error("Error reading Parquet file from S3: %s", e)
             return pd.DataFrame()
-
         except Exception as e:
             logger.error("Error reading Parquet file from S3: %s", e)
             return pd.DataFrame()
@@ -154,21 +150,20 @@ class FREDDataLoader:
                         continue
 
                 records_loaded = self.load_data_to_db(
-                    dataframe=df,
-                    table_name=table_name,
-                    unique_columns=unique_columns
+                    df,
+                    table_name,
+                    unique_columns
                 )
 
                 logger.info("Loaded %s records from S3 path %s to table: %s", records_loaded, aggregated_s3_data_path, table_name)
                 successful_s3_paths_loaded.append(aggregated_s3_data_path)
-
             return successful_s3_paths_loaded
 
         except Exception as e:
             logger.error("Error loading data from S3 to RDS: %s", e)
             raise
 
-def load_to_rds(series_id: str, start_year: int, end_year: int, table_name: str) -> Optional[List[str]]:
+def load_to_rds(series_id: str, start_year: int, end_year: int, table_name: str, db_conn_id: str = "postgres_default") -> Optional[List[str]]:
     """
     Load data to RDS
 
@@ -185,23 +180,23 @@ def load_to_rds(series_id: str, start_year: int, end_year: int, table_name: str)
         'port': os.getenv('RDS_PORT')
     }
 
-    loader = FREDDataLoader(db_params)
+    loader = FREDDataLoader(db_conn_id=db_conn_id)
 
     return loader.load_from_s3_to_rds(
-            series_id=series_id,
-            start_year=start_year,
-            end_year=end_year,
-            table_name=table_name
+                series_id,
+                start_year,
+                end_year,
+                table_name
             )
 
-if __name__ == "__main__":
-    result = load_to_rds(
-        series_id='UNRATE',
-        start_year=2017,
-        end_year=2018,
-        table_name='economic_indicators'
-    )
-    if result:
-        logger.info("Successfully loaded data to RDS from the following S3 paths: %s", result)
-    else:
-        logger.error("Failed to load data to RDS.")
+# if __name__ == "__main__":
+#     result = load_to_rds(
+#         series_id='UNRATE',
+#         start_year=2017,
+#         end_year=2018,
+#         table_name='economic_indicators'
+#     )
+#     if result:
+#         logger.info("Successfully loaded data to RDS from the following S3 paths: %s", result)
+#     else:
+#         logger.error("Failed to load data to RDS.")
