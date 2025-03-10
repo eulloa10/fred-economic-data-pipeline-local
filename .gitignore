@@ -65,6 +65,7 @@ warn-summary-*.txt
 
 # Google API
 google_credentials.json
+token.json
 
 # Temporary files
 *.bak
