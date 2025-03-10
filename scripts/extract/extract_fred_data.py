@@ -39,8 +39,8 @@ class DateRangeGenerator:
         :return: List of (start, end) date tuples
         """
         try:
-            start_date = pd.to_datetime(start_date)
-            end_date = pd.to_datetime(end_date)
+            start_date = pd.to_datetime(start_date, utc=True)
+            end_date = pd.to_datetime(end_date, utc=True)
 
             date_ranges = []
             current_start = start_date
@@ -192,7 +192,7 @@ class FREDDataExtractor:
 
         except Exception as e:
             logger.error("An unexpected error occurred during formatting for %s: %s", series_id, e)
-            return None
+            raise
 
     def save_to_s3(self,
                    df: pd.DataFrame,
@@ -231,11 +231,11 @@ class FREDDataExtractor:
             return s3_path
 
         except ClientError as e:
-            logger.error(f"S3 error during save: {e}")
+            logger.error("S3 error during save: %s", e)
             raise
         except Exception as e:
             logger.error("An unexpected error occurred during S3 save: %s", e)
-            return None
+            raise
 
     def process_fred_data(self,
                           series_id: str,
@@ -289,7 +289,7 @@ class FREDDataExtractor:
 
         except Exception as e:
             logger.error("A processing error occurred: %s", e, exc_info=True)
-            return None
+            raise
 
 def extract_fred_indicator(
     series_id: str,

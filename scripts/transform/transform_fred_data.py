@@ -33,8 +33,8 @@ class YearMonthGenerator:
         logger.info("Generating year-month combinations from %s to %s", start_date, end_date)
 
         try:
-            start_date = pd.to_datetime(start_date)
-            end_date = pd.to_datetime(end_date)
+            start_date = pd.to_datetime(start_date, utc=True)
+            end_date = pd.to_datetime(end_date, utc=True)
 
             year_months = {}
             current_date = start_date
@@ -52,7 +52,7 @@ class YearMonthGenerator:
 
         except Exception as e:
             logger.error("Error generating year-month combinations: %s", e)
-            return {}
+            raise
 
 class FREDDataProcessor:
     def __init__(self,
@@ -95,13 +95,13 @@ class FREDDataProcessor:
 
         except ClientError as e:
             logger.error("Error reading JSON from S3: %s", e)
-            return pd.DataFrame()
+            raise
         except pd.errors.ParserError as e:
             logger.error("Error parsing JSON from S3: %s", e)
-            return pd.DataFrame()
+            raise
         except Exception as e:
             logger.error("Error reading JSON from S3: %s", e)
-            return pd.DataFrame()
+            raise
 
     def transform_raw_data(self, raw_data: pd.DataFrame) -> pd.DataFrame:
         """
@@ -148,7 +148,7 @@ class FREDDataProcessor:
 
         except Exception as e:
             logger.error("Error transforming raw data: %s", e)
-            return pd.DataFrame()
+            raise
 
     def save_parquet_to_s3(self,
                            df: pd.DataFrame,
@@ -212,7 +212,7 @@ class FREDDataProcessor:
 
         except Exception as e:
             logger.error("Error processing raw data: %s", e)
-            return None
+            raise
 
 def transform_fred_indicator_raw_data(
     series_id: str,

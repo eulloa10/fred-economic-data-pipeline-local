@@ -172,14 +172,6 @@ def load_to_rds(series_id: str, start_year: int, end_year: int, table_name: str,
     :param end_year: Ending year for data
     :param table_name: Name of the table in the database
     """
-    db_params = {
-        'host': os.getenv('RDS_HOST'),
-        'database': os.getenv('RDS_DATABASE'),
-        'user': os.getenv('RDS_USER'),
-        'password': os.getenv('RDS_PASSWORD'),
-        'port': os.getenv('RDS_PORT')
-    }
-
     loader = FREDDataLoader(db_conn_id=db_conn_id)
 
     return loader.load_from_s3_to_rds(
