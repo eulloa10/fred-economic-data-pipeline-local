@@ -9,7 +9,6 @@ import requests
 from requests.adapters import HTTPAdapter, Retry
 from dotenv import load_dotenv
 from airflow.hooks.S3_hook import S3Hook
-# from airflow.utils.log.logging_mixin import LoggingMixin
 
 load_dotenv(os.path.join(os.path.dirname(__file__), '../../.env'))
 
@@ -19,11 +18,6 @@ S3_DATA_LAKE = os.getenv('S3_DATA_LAKE')
 AWS_CONN_ID = os.getenv('AWS_CONN_ID')
 
 logger = logging.getLogger(__name__)
-
-# logging.basicConfig(
-#     level=logging.INFO,
-#     format='%(asctime)s - %(levelname)s - %(message)s'
-# )
 
 class DateRangeGenerator:
     @staticmethod
@@ -120,22 +114,26 @@ class FREDDataExtractor:
             data: Dict[str, Any] = response.json()
 
             if 'observations' not in data or not isinstance(data['observations'], list):
-                logger.warning("Invalid API response for series_id: %s", series_id)
-                return None
+                error_message = f"Invalid API response for series_id: {series_id}"
+                logger.error(error_message)
+                raise ValueError(error_message)
 
             if not data['observations']:
-                logger.warning("No observations found in API response for series_id: %s", series_id)
-                return None
+                error_message = f"No observations found in API response for series_id: {series_id}"
+                logger.error(error_message)
+                raise ValueError(error_message)
 
             if not all(isinstance(obs, dict) and 'date' in obs and 'value' in obs for obs in data['observations']):
-                logger.warning("Invalid observation data for series_id: %s", series_id)
-                return None
+                error_message = f"Invalid observation data for series_id: {series_id}"
+                logger.error(error_message)
+                raise ValueError(error_message)
 
             df = pd.DataFrame(data['observations'])
 
             if not all(col in df.columns for col in ['date', 'value']):
-                logger.warning("Missing columns in DataFrame for series_id: %s", series_id)
-                return None
+                error_message = f"Missing columns in DataFrame for series_id: {series_id}"
+                logger.error(error_message)
+                raise ValueError(error_message)
 
             logger.info("Successfully extracted %d rows of data for series_id: %s", len(df), series_id)
             return df
@@ -306,16 +304,3 @@ def extract_fred_indicator(
     """
     extractor = FREDDataExtractor()
     return extractor.process_fred_data(series_id, start_date, end_date)
-
-# if __name__ == '__main__':
-#     result = extract_fred_indicator(
-#         series_id='UNRATE',
-#         start_date='2010-01-01',
-#         end_date='2010-02-28'
-#     )
-#     if result:
-#         print("Extraction successful. S3 Paths:")
-#         for path in result:
-#             print(path)
-#     else:
-#         print("Extraction failed or no data found")

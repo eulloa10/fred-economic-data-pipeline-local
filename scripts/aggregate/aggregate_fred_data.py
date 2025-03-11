@@ -13,10 +13,6 @@ load_dotenv(os.path.join(os.path.dirname(__file__), '../../.env'))
 S3_DATA_LAKE = os.getenv('S3_DATA_LAKE')
 
 logger = logging.getLogger(__name__)
-# logging.basicConfig(
-#     level=logging.INFO,
-#     format='%(asctime)s - %(levelname)s - %(message)s'
-# )
 
 class FredDataAggregator:
     def __init__(self,
@@ -151,16 +147,3 @@ def aggregate_fred_indicator_processed_data(
     logger.info("Aggregating data for series ID %s from %s to %s", series_id, start_year, end_year)
     aggregator = FredDataAggregator()
     return aggregator.aggregate_data(series_id, start_year, end_year)
-
-# if __name__ == '__main__':
-#     result = aggregate_fred_indicator_processed_data(
-#         series_id='UNRATE',
-#         start_year=2016,
-#         end_year=2016
-#     )
-#     if result:
-#         logger.info("Aggregation completed successfully. S3 paths: %s", result)
-#         for path in result:
-#             print(path)
-#     else:
-#         logger.error("Aggregation failed. No data returned.")

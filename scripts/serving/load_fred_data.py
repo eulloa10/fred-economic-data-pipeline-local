@@ -16,10 +16,6 @@ load_dotenv(os.path.join(os.path.dirname(__file__), '../../.env'))
 S3_DATA_LAKE = os.getenv('S3_DATA_LAKE')
 
 logger = logging.getLogger(__name__)
-# logging.basicConfig(
-#     level=logging.INFO,
-#     format='%(asctime)s - %(levelname)s - %(message)s'
-# )
 
 class FREDDataLoader:
     def __init__(self,
@@ -167,15 +163,3 @@ def load_to_rds(series_id: str, start_year: int, end_year: int, table_name: str,
                 end_year,
                 table_name
             )
-
-# if __name__ == "__main__":
-#     result = load_to_rds(
-#         series_id='UNRATE',
-#         start_year=2017,
-#         end_year=2018,
-#         table_name='economic_indicators'
-#     )
-#     if result:
-#         logger.info("Successfully loaded data to RDS from the following S3 paths: %s", result)
-#     else:
-#         logger.error("Failed to load data to RDS.")

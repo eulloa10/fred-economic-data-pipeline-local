@@ -13,10 +13,6 @@ S3_DATA_LAKE = os.getenv('S3_DATA_LAKE')
 AWS_CONN_ID = os.getenv('AWS_CONN_ID')
 
 logger = logging.getLogger(__name__)
-# logging.basicConfig(
-#     level=logging.INFO,
-#     format='%(asctime)s - %(levelname)s - %(message)s'
-# )
 
 class YearMonthGenerator:
     @staticmethod
@@ -90,8 +86,9 @@ class FREDDataProcessor:
                     data = pd.read_json(io.StringIO(raw_data))
                     return data
             else:
-                logger.warning("File not found at %s. Returning empty DataFrame.", s3_path)
-                return pd.DataFrame()
+                error_message = f"File not found at {s3_path}"
+                logger.error(error_message)
+                raise FileNotFoundError(error_message)
 
         except ClientError as e:
             logger.error("Error reading JSON from S3: %s", e)
@@ -228,16 +225,3 @@ def transform_fred_indicator_raw_data(
     logger.info("Transforming FRED indicator raw data for series_id: %s, start_date: %s, end_date: %s", series_id, start_date, end_date)
     processor = FREDDataProcessor()
     return processor.process_raw_data(series_id, start_date, end_date)
-
-# if __name__ == '__main__':
-#     result = transform_fred_indicator_raw_data(
-#         series_id='UNRATE',
-#         start_date='2016-01-01',
-#         end_date='2016-01-31'
-#     )
-#     if result:
-#         logger.info("Transform successful. Processed data paths:")
-#         for path in result:
-#             print(path)
-#     else:
-#         logger.error("Transform failed. No data processed.")

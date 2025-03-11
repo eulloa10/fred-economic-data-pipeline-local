@@ -41,8 +41,8 @@ def create_fred_historical_backfill_dag(indicator_config):
     default_args = {
         'owner': 'airflow',
         'depends_on_past': False,
-        'start_date': datetime(2010, 1, 1),
-        'end_date': datetime(2010, 12, 31),
+        'start_date': datetime(2023, 1, 1),
+        'end_date': datetime(2024, 12, 31),
         'email_on_failure': False,
         'email_on_retry': False,
         'retries': 1,

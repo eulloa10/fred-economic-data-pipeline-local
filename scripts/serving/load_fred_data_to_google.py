@@ -15,10 +15,6 @@ S3_DATA_LAKE = os.getenv('S3_DATA_LAKE')
 GOOGLE_CREDENTIALS = os.getenv('GOOGLE_CREDENTIALS')
 
 logger = logging.getLogger(__name__)
-# logging.basicConfig(
-#     level=logging.INFO,
-#     format='%(asctime)s - %(levelname)s - %(message)s'
-# )
 
 class FREDGoogleSheetLoader:
     def __init__(self,
@@ -94,6 +90,20 @@ class FREDGoogleSheetLoader:
 
             sheet_data = pd.DataFrame(data, columns=header)
             logger.info("Columns in sheet data: %s", sheet_data.columns)
+
+            for col in unique_columns:
+                if col in df.columns and col in sheet_data.columns:
+                    try:
+                        df[col] = pd.to_numeric(df[col], errors='ignore')
+                        sheet_data[col] = pd.to_numeric(sheet_data[col], errors='ignore')
+                    except ValueError:
+                        df[col] = df[col].astype(str).str.strip().str.lower()
+                        sheet_data[col] = sheet_data[col].astype(str).str.strip().str.lower()
+
+            logger.info(f"df unique columns datatypes: {df[unique_columns].dtypes}")
+            logger.info(f"sheet_data unique columns datatypes: {sheet_data[unique_columns].dtypes}")
+            logger.info(f"df unique columns values: {df[unique_columns]}")
+            logger.info(f"sheet_data unique columns values: {sheet_data[unique_columns]}")
 
             if not sheet_data.empty:
                 existing_data = sheet_data[unique_columns]
@@ -174,16 +184,3 @@ def load_to_google_sheet(series_id: str, start_year: int, end_year: int, google_
     loader = FREDGoogleSheetLoader(google_sheet_name=google_sheet_name)
     unique_columns = ['indicator', 'observation_year', 'observation_month']
     return loader.load_from_s3_to_google_sheet(series_id, start_year, end_year, unique_columns)
-
-
-# if __name__ == "__main__":
-#     result = load_to_google_sheet(
-#         series_id='UNRATE',
-#         start_year=2010,
-#         end_year=2010,
-#         google_sheet_name='fred_data'
-#     )
-#     if result:
-#         logger.info("Successfully loaded data to Google Sheets from the following S3 paths: %s", result)
-#     else:
-#         logger.error("Failed to load data to Google Sheets.")
