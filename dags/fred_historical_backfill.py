@@ -9,6 +9,7 @@ from scripts.extract.extract_fred_data import extract_fred_indicator
 from scripts.transform.transform_fred_data import transform_fred_indicator_raw_data
 from scripts.aggregate.aggregate_fred_data import aggregate_fred_indicator_processed_data
 from scripts.serving.load_fred_data import load_to_rds
+from scripts.serving.load_fred_data_to_google import load_to_google_sheet
 
 def load_indicators_config():
     """
@@ -65,7 +66,7 @@ def create_fred_historical_backfill_dag(indicator_config):
             try:
                 extract_fred_indicator(series_id=series_id, start_date=start_date, end_date=end_date)
             except Exception as e:
-                logging.getLogger(__name__).error(f"Monthly extraction failed for {series_id} in {start_date}: {e}")
+                logging.getLogger(__name__).error("Monthly extraction failed for %s in %s: %s", series_id, start_date, e)
                 raise
 
         def transform_monthly_task(series_id, start_date, end_date, **kwargs):
@@ -75,7 +76,7 @@ def create_fred_historical_backfill_dag(indicator_config):
             try:
                 transform_fred_indicator_raw_data(series_id=series_id, start_date=start_date, end_date=end_date)
             except Exception as e:
-                logging.getLogger(__name__).error(f"Monthly transformation failed for {series_id}: {e}")
+                logging.getLogger(__name__).error("Monthly transformation failed for %s: %s", series_id, e)
                 raise
 
         def aggregate_yearly_task(series_id, year, **kwargs):
@@ -96,6 +97,17 @@ def create_fred_historical_backfill_dag(indicator_config):
             try:
                 year = int(year)
                 load_to_rds(series_id=series_id, start_year=year, end_year=year, table_name=table_name)
+            except Exception as e:
+                logging.getLogger(__name__).error("Yearly loading failed for %s in %s: %s", series_id, year, e)
+                raise
+
+        def load_to_google_sheet_yearly_task(series_id, year, sheet_name, **kwargs):
+            """
+            Load aggregated yearly data
+            """
+            try:
+                year = int(year)
+                load_to_google_sheet(series_id=series_id, start_year=year, end_year=year, google_sheet_name=sheet_name)
             except Exception as e:
                 logging.getLogger(__name__).error("Yearly loading failed for %s in %s: %s", series_id, year, e)
                 raise
@@ -146,8 +158,18 @@ def create_fred_historical_backfill_dag(indicator_config):
             trigger_rule='all_success'
         )
 
-        # Define task dependencies
-        extract_monthly >> transform_monthly >> aggregate_yearly >> load_yearly
+        load_google_sheet_yearly = PythonOperator(
+            task_id='load_google_sheet_yearly',
+            python_callable=load_to_google_sheet_yearly_task,
+            op_kwargs={
+                'series_id': indicator_config['series_id'],
+                'year': year,
+                'sheet_name': indicator_config['sheet_name'],
+            },
+            trigger_rule='all_success'
+        )
+
+        extract_monthly >> transform_monthly >> aggregate_yearly >> load_yearly >> load_google_sheet_yearly
 
     return dag
 
